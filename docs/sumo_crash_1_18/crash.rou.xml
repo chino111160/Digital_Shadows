@@ -1,0 +1,6 @@
+<routes>
+  <route id="rA" edges="E1 -E3"/>
+  <route id="rB" edges="E1 -E6"/>
+  <vehicle id="v0"  route="rB" depart="0" departLane="2" departPos="5"  departSpeed="0"/>
+  <vehicle id="v12" route="rA" depart="1" departLane="2" departPos="30" departSpeed="0"/>
+</routes>

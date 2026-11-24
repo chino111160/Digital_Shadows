@@ -1,51 +1,48 @@
-# SUMO >= 1.18 crashes the vision pipeline (regression from 1.17.0 to 1.18.0)
+# SUMO >= 1.18 segfaults on this project's network (regression from 1.17.0 to 1.18.0)
 
 Found on 2026-11-24 while trying to move the WSL demo to the latest SUMO. **Stay on SUMO 1.12.0** (the version the
-README documents); this folder records why and keeps a minimal reproduction.
+README documents). This folder holds a minimal, file-only reproduction and a draft issue for SUMO.
 
-## Symptom
-
-`python scripts/run_harness_demo_causal.py --readout` dies at `tr.simulationStep(t)`
-(`scripts/demo_causal/run_harness_causal.py`, `run_readout`) with
-`traci.exceptions.FatalTraCIError: Connection closed by SUMO.` The SUMO process exits with code 245
-(= -11 mod 256, a likely SIGSEGV; the signal itself was not observed). It also happens headless, so it is not the GUI.
-The V2I message shadow is not affected (it runs on 1.28.0 with the same metrics).
-
-## Bisection (replay of the recorded session, deterministic)
-
-| SUMO | `replay_crash.py` |
+| File | What |
 |---|---|
-| 1.12.0, 1.14.1, 1.16.0, **1.17.0** | no crash |
-| **1.18.0**, 1.20.0, 1.22.0, 1.24.0, 1.26.0, 1.27.0, 1.28.0 | crash after 981 commands |
+| `crash.rou.xml` | two vehicles, routes `E1 -E3` and `E1 -E6`, both on lane 2 |
+| `intersection_rusia.net.xml` | the Rusia network (copy of `config/sites/rusia/sumo/`, 18 KB) |
+| `run_repro.sh` | runs `sumo -n intersection_rusia.net.xml -r crash.rou.xml -e 60` and prints the exit code |
+| `ISSUE.md` | draft issue for <https://github.com/eclipse-sumo/sumo/issues> (**not filed**) |
 
-(1.13, 1.15, 1.19, 1.21, 1.23, 1.25, 1.27.1 were not tested; PyPI `eclipse-sumo` 1.28.0 is the latest.)
+## Result
 
-## What the crash needs (and does not)
+`run_repro.sh` exits 0 on SUMO 1.12.0, 1.13.0, 1.14.1, 1.15.0, 1.16.0 and **1.17.0**, and with **139 (SIGSEGV)** on
+**1.18.0**, 1.19.0, 1.20.0, 1.21.0, 1.22.0, 1.23.1, 1.24.0, 1.25.0, 1.26.0, 1.27.0, 1.27.1 and 1.28.0 (the latest on PyPI).
+No TraCI is needed. In the demo it shows up as `Connection closed by SUMO` / exit 245 (= -11 mod 256 through the
+pip wrapper of `sumo`; the real binary returns 139).
 
-- Not caused by a TraCI call that fails: SUMO 1.28 prints a new error text for an unreachable `changeTarget`
-  (`destination edge '-E6' unreachable`, vs 1.12 `No route found`), but pre-checking reachability so that call is never
-  made does **not** avoid the crash (the re-created vehicle's `changeTarget` then succeeds and SUMO still dies on the next step).
-- Needs the vehicles `v0` and `v12` of the recording alive together (v0 alone, v12 alone, v0+v13, v12+v13 do not crash) and the
-  `remove`+`add` of `v0` followed by `moveToXY` into the junction (`keepRoute=1`).
-- Disappears with `--no-internal-links true` (so it involves the junction's internal lanes; this changes the model and the
-  lane ids the validation uses, so it is not a fix).
-- Disappears with step lengths >= 0.05 s, but that changes the pipeline (it relies on `remove` taking effect before the
-  `add` within 1 ms steps; on 1.12 it fails with "vehicle already exists"), so it is not a fix either.
-- Not changed by `--collision.action warn|teleport|remove`, `--collision.check-junctions`, `--ignore-junction-blocker`,
-  `--lanechange.duration 0`, `--device.rerouting.probability 0`.
+## How it was reduced
 
-## SUMO 1.17.0 is not a drop-in replacement either
+1. The vision shadow's `--readout` died at `simulationStep`. A recording of its 982 state-changing TraCI commands
+   reproduced the crash deterministically without the vision pipeline (crash from 1.18.0 on).
+2. Delta debugging (ddmin) cut it to 9 commands: two vehicles added on `E1` lane 2, `changeTarget` of `v12` to `-E3` and
+   of `v0` to `-E6`, one `moveToXY`, one step.
+3. Re-sequencing (insert each vehicle with its own step) showed `moveToXY` is not needed, and explicit routes in a
+   `.rou.xml` reproduce it with the plain `sumo` binary.
 
-On 1.17.0 the readout passes the causality probe (70 vehicles drawn, 66 effective re-emissions, 3 `remove+add` / 63 `changeTarget`,
-same as 1.12.0) and every drawn lane is identical, but `exit_frames` differs for the 8 vehicles that exit to the south
-(about 140 frames fewer on 1.17.0: 393 -> 253, 337 -> 197, ...). Until the cause is understood, results should be produced with 1.12.0.
+Earlier hypotheses that were wrong: the crash is **not** caused by a failing `changeTarget`, by the vehicle types, by the
+step length, nor by the traffic light.
 
-## Reproduce
+## What it depends on
 
-```bash
-python -m venv v && v/bin/pip install eclipse-sumo==1.28.0 traci==1.28.0 sumolib==1.28.0
-PATH=$PWD/v/bin:$PATH python docs/sumo_crash_1_18/replay_crash.py     # CRASH after 981 commands
-```
+- Both vehicles, on different conflicting links of the same junction (`v12` to `-E3`, `v0` to `-E6`) and both on lane 2
+  of `E1`; the last state before the crash has `v12` on the internal lane `:J5_9_1` and `v0` approaching on `E1_2`.
+- Junction internal links: `--no-internal-links true` avoids it (but changes the model, so it is not a fix here).
+- Not changed by `--tls.all-off`, `--step-length`, `--lateral-resolution`, `--collision.action`, `--sloppy-insert`,
+  `--ignore-junction-blocker`, `--default.speeddev`.
+- Sensitive to the insertion state (`departSpeed="0"` present, `v12` depart 1 s, `departPos` 30) and to the exact junction
+  geometry: regenerating the junction with `netconvert` makes it disappear.
 
-`commands.json` was recorded by wrapping `traci.connection.Connection._sendCmd` while the readout ran on SUMO 1.28.0.
-Not reported upstream yet.
+## Impact on this project
+
+The vision shadow (`--readout`) needs SUMO <= 1.17.0. SUMO 1.17.0 is not a drop-in replacement: its readout draws the same
+lanes but `exit_frames` differs for 8 vehicles that exit to the south (about 140 frames fewer), so results are produced
+with 1.12.0. The V2I message shadow works on 1.28.0.
+
+Not reported upstream yet; no existing issue was found (#13994 is also 1.18.0 but is a sublane / `moveToXY keepRoute=3` crash).
