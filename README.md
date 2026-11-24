@@ -156,7 +156,9 @@ scripts/wsl/run_demo.sh messages           # -> http://127.0.0.1:8300/index.html
 scripts/wsl/run_demo.sh messages-smoke     # headless 30 s self-test
 ```
 
-Notes: use **SUMO 1.12** (a newer one, e.g. 1.28 from pip, crashes the pipeline with exit code 245);
+Notes: use **SUMO 1.12** (the vision pipeline crashes SUMO — exit code 245 — from 1.18.0 on, including
+the latest, 1.28.0; 1.17.0 runs but changes `exit_frames` of 8 vehicles; bisection and a deterministic
+reproduction in [`docs/sumo_crash_1_18/`](docs/sumo_crash_1_18/README.md));
 `ffplay` is optional (`sudo apt install ffmpeg`) — without it the shadow runs but the video window is
 skipped; the md5 "provenance guard" of the demo only warns (the pins come from the authors' internal
 tree; set `DS_STRICT_PROVENANCE=1` to make it abort).

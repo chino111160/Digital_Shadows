@@ -14,7 +14,7 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 BASE="${BASE:-$HOME/ds}"
-SUMO_VERSION="${SUMO_VERSION:-1.12.0}"   # README: SUMO 1.12. SUMO 1.28 crashes (exit 245) in this pipeline.
+SUMO_VERSION="${SUMO_VERSION:-1.12.0}"   # README: SUMO 1.12. SUMO >= 1.18 crashes (exit 245) in the vision pipeline: docs/sumo_crash_1_18/
 mkdir -p "$BASE"
 
 echo "== 1. uv =="
