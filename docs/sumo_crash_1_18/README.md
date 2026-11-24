@@ -8,7 +8,7 @@ README documents). This folder holds a minimal, file-only reproduction and a dra
 | `crash.rou.xml` | two vehicles, routes `E1 -E3` and `E1 -E6`, both on lane 2 |
 | `intersection_rusia.net.xml` | the Rusia network (copy of `config/sites/rusia/sumo/`, 18 KB) |
 | `run_repro.sh` | runs `sumo -n intersection_rusia.net.xml -r crash.rou.xml -e 60` and prints the exit code |
-| `ISSUE.md` | draft issue for <https://github.com/eclipse-sumo/sumo/issues> (**not filed**) |
+| `ISSUE.md` | working draft of the issue filed upstream: <https://github.com/eclipse-sumo/sumo/issues/19197> |
 
 ## Result
 
@@ -45,4 +45,5 @@ The vision shadow (`--readout`) needs SUMO <= 1.17.0. SUMO 1.17.0 is not a drop-
 lanes but `exit_frames` differs for 8 vehicles that exit to the south (about 140 frames fewer), so results are produced
 with 1.12.0. The V2I message shadow works on 1.28.0.
 
-Not reported upstream yet; no existing issue was found (#13994 is also 1.18.0 but is a sublane / `moveToXY keepRoute=3` crash).
+Reported upstream on 2026-11-24 as [eclipse-sumo/sumo#19197](https://github.com/eclipse-sumo/sumo/issues/19197); no existing issue was found
+(#13994 is also 1.18.0 but is a sublane / `moveToXY keepRoute=3` crash). Check it for a fix before moving past SUMO 1.12.0.

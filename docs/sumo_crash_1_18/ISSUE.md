@@ -1,4 +1,6 @@
-# Draft issue for https://github.com/eclipse-sumo/sumo/issues (NOT filed)
+# Issue filed on 2026-11-24: https://github.com/eclipse-sumo/sumo/issues/19197
+
+(This is the working draft; the filed text follows SUMO's bug-report template and embeds the network inline.)
 
 **Title:** Segmentation fault since 1.18.0 (works in 1.17.0): two vehicles with conflicting routes crossing a junction with internal links
 
