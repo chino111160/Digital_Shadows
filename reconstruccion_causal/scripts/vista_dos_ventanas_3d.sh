@@ -71,7 +71,20 @@ PIDS=()
 cleanup() {
   for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done
 }
-trap cleanup EXIT INT TERM
+# SESSION_DONE=1 once the player has finished and its outputs are written. From then on
+# the only thing left is the 3D viewer / SUMO-GUI windows staying open for inspection, so
+# closing them (Ctrl+C, SIGTERM) is the normal way to end the session and exits 0 instead of
+# a signal status (130/143). An interruption BEFORE the run completes keeps the signal status.
+SESSION_DONE=0
+on_signal() {
+  local sig_rc=$1
+  cleanup
+  [ "$SESSION_DONE" = 1 ] && exit 0
+  exit "$sig_rc"
+}
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 echo "[vista3d] REALIDAD :$PORT_REAL | SOMBRA :$PORT_SOMBRA | 3D ws:$WS_PORT http:$HTTP_PORT"
 echo "[vista3d] csv=$CSV | delay=${DELAY}ms (1x=50) | gracia=${GRACE}s | out=$OUT"
@@ -130,6 +143,10 @@ if [ -n "$SMOKE_TMAX" ]; then
 else
     wait "$DRIVER_PID" || true
     wait "$CAUSAL_PID" || true
+    SESSION_DONE=1
+    # The SUMO-GUI windows stay open on purpose (inspect the final state, 3D viewer still
+    # served); close them or press Ctrl+C to end. Either way the launcher exits 0.
     wait "$SUMO_REAL_PID" "$SUMO_SOMBRA_PID" 2>/dev/null || true
     echo "[vista3d] sesión terminada; salidas en $OUT (ws_log + occ + summary)"
 fi
+exit 0
