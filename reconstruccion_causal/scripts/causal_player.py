@@ -58,6 +58,48 @@ def load_rows(csv_path):
         return list(csv.DictReader(f))
 
 
+_LANE_END_CACHE = {}
+
+
+END_CLAMP_TOL_M = 1.5   # SUMO freezes the vehicle ~1 m before the lane end (measured)
+
+
+def beyond_lane_end(lane_id, x, y, xr, yr, tol=END_CLAMP_TOL_M):
+    """True if the commanded point (x, y) is at/after the END of lane_id (within
+    `tol` m before it, along its last segment), the lane is a dead end (the net has
+    no continuation there) and the point SUMO actually read (xr, yr) lags behind
+    it along that segment.
+
+    The CSV keeps moving a vehicle in a straight line past the end of the exit
+    approaches (-E3, -E5, -E6 in the Rusia net), but the net stops there:
+    moveToXY cannot place a vehicle where there is no road, so SUMO leaves it
+    frozen at the edge end and the commanded-vs-read gap grows linearly. That gap is
+    not a projection error of the shadow, it is data outside the modeled network,
+    so the validation reports those ticks apart (FUERA_DE_RED) instead of FAIL.
+    Only dead-end lanes qualify: on a connected lane a large error stays a FAIL.
+    """
+    info = _LANE_END_CACHE.get(lane_id)
+    if info is None:
+        try:
+            shape = traci.lane.getShape(lane_id)
+            links = traci.lane.getLinks(lane_id)
+        except traci.TraCIException:
+            shape, links = None, None
+        info = False
+        if shape and len(shape) >= 2 and not links:
+            (x0, y0), (x1, y1) = shape[-2], shape[-1]
+            seg = math.hypot(x1 - x0, y1 - y0)
+            if seg > 0:
+                info = (x1, y1, (x1 - x0) / seg, (y1 - y0) / seg)
+        _LANE_END_CACHE[lane_id] = info
+    if not info:
+        return False
+    ex, ey, ux, uy = info
+    cmd_past = (x - ex) * ux + (y - ey) * uy > -tol
+    read_lags = (xr - x) * ux + (yr - y) * uy < 0.0
+    return cmd_past and read_lags
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", required=True)
@@ -67,6 +109,9 @@ def main():
     ap.add_argument("--gui", action="store_true")
     ap.add_argument("--ok-th", type=float, default=0.1)
     ap.add_argument("--warn-th", type=float, default=0.5)
+    ap.add_argument("--strict-net", action="store_true",
+                    help="count ticks past the end of dead-end exit lanes as "
+                         "WARNING/FAIL instead of FUERA_DE_RED")
     ap.add_argument("--delay-s", type=float, default=1.0,
                     help="delay de emisión (s); el buffer de decisión es el mismo valor")
     ap.add_argument("--period-s", type=float, required=True,
@@ -840,6 +885,13 @@ def main():
                 ang_err = (ar - st["angle"] + 180) % 360 - 180
                 status = ("OK" if err <= args.ok_th
                           else "WARNING" if err <= args.warn_th else "FAIL")
+                # data past the end of a dead-end exit lane: not representable in
+                # the net, reported apart (see beyond_lane_end). --strict-net
+                # restores the raw classification.
+                if (status != "OK" and not args.strict_net
+                        and beyond_lane_end(st["lane_csv"], st["sx"], st["sy"],
+                                            xr, yr)):
+                    status = "FUERA_DE_RED"
                 prov = st["provenance"]
                 scsv = st["sim_time_csv"]
                 val_rows.append({
@@ -1071,7 +1123,12 @@ def main():
     n_ok = sum(1 for r in val_rows if r["projection_status"] == "OK")
     n_warn = sum(1 for r in val_rows if r["projection_status"] == "WARNING")
     n_fail = sum(1 for r in val_rows if r["projection_status"] == "FAIL")
-    errs = sorted(r["position_error_m"] for r in val_rows)
+    n_out = sum(1 for r in val_rows if r["projection_status"] == "FUERA_DE_RED")
+    # the error stats cover what the net can represent; the raw max (including the
+    # ticks past the end of dead-end lanes) is kept in error_pos_m_bruto_max
+    errs = sorted(r["position_error_m"] for r in val_rows
+                  if r["projection_status"] != "FUERA_DE_RED")
+    err_bruto_max = max((r["position_error_m"] for r in val_rows), default=0.0)
     slot_rows = [r for r in val_rows if r["sim_time_csv"] is not None]
     delays = sorted(r["delay_efectivo_s"] for r in slot_rows)
     delay_err_max = max((abs(r["delay_efectivo_s"] - args.delay_s)
@@ -1091,6 +1148,8 @@ def main():
         "vehiculos_creados": len(assigned_type),
         "estados_aplicados": len(val_rows),
         "n_OK": n_ok, "n_WARNING": n_warn, "n_FAIL": n_fail,
+        "n_FUERA_DE_RED": n_out,
+        "error_pos_m_bruto_max": err_bruto_max,
         "error_pos_m": {"min": errs[0] if errs else 0.0, "mediana": pct(errs, 0.5),
                         "p95": pct(errs, 0.95), "max": errs[-1] if errs else 0.0},
         "delay_aplicado_s": args.delay_s,
@@ -1160,7 +1219,10 @@ def main():
     print(f"vehiculos           = {len(trackers)} (creados {len(assigned_type)})")
     print(f"estados_aplicados   = {len(val_rows)}")
     print(f"OK/WARN/FAIL        = {n_ok}/{n_warn}/{n_fail}")
-    print(f"position_error_max  = {errs[-1] if errs else 0.0:.4f}")
+    print(f"fuera_de_red        = {n_out} (datos mas alla del final de carriles sin "
+          f"salida; excluidos de OK/WARN/FAIL y del error)")
+    print(f"position_error_max  = {errs[-1] if errs else 0.0:.4f}"
+          f"  (bruto con fuera_de_red: {err_bruto_max:.4f})")
     print(f"delay_error_s_max   = {summary['delay_error_s_max']:.4f} "
           f"(ok={summary['delay_ok']})")
     print(f"teleports           = {teleports}")

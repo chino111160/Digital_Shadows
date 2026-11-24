@@ -143,6 +143,24 @@ export PYTHONPATH="$SUMO_HOME/tools:$(pwd):$PYTHONPATH"
 
 In the commands below, always export `SUMO_HOME` (and `DISPLAY` for the windowed modes).
 
+### Running on Windows via WSL2 (Ubuntu, no sudo)
+
+Tested on WSL2 + WSLg (Ubuntu with Python 3.14 only). Use a clone **inside** the WSL filesystem
+(a Windows checkout with `core.autocrlf=true` turns the files into CRLF and breaks the scripts):
+
+```bash
+git clone <this repo> ~/ds/Digital_Shadows && cd ~/ds/Digital_Shadows
+bash scripts/wsl/setup_wsl.sh              # uv + Python 3.10 + deps + SUMO 1.12.0 (all under ~/ds)
+scripts/wsl/run_demo.sh vision             # -> http://127.0.0.1:8301/index.html (open it in Windows)
+scripts/wsl/run_demo.sh messages           # -> http://127.0.0.1:8300/index.html + 2 SUMO-GUI windows
+scripts/wsl/run_demo.sh messages-smoke     # headless 30 s self-test
+```
+
+Notes: use **SUMO 1.12** (a newer one, e.g. 1.28 from pip, crashes the pipeline with exit code 245);
+`ffplay` is optional (`sudo apt install ffmpeg`) — without it the shadow runs but the video window is
+skipped; the md5 "provenance guard" of the demo only warns (the pins come from the authors' internal
+tree; set `DS_STRICT_PROVENANCE=1` to make it abort).
+
 ### Obtaining the large assets
 
 To keep the repository light, two kinds of heavy input are **not versioned**. The default
@@ -199,6 +217,36 @@ CSV=inputs/cert/mc_2Hz_P40.csv PERIOD=0.5 OUT=runs/demo_p40 ./scripts/vista_dos_
 
 The input CSVs `mc_<freq>Hz_P<loss>.csv` live in `reconstruccion_causal/inputs/cert/`
 (frequencies 1/2/5 Hz; loss levels P00–P50).
+
+### Reading the validation summary: `FUERA_DE_RED`
+
+`causal_player.py` compares, after every tick, the position it commanded with the one SUMO
+reports. A tick is `OK` (≤ 0.1 m), `WARNING` (≤ 0.5 m) or `FAIL` (> 0.5 m).
+
+The input CSVs keep moving each vehicle in a straight line past the end of the three exit
+approaches (`-E3`, `-E5`, `-E6` in the Rusia net), but those edges are dead ends: the net has
+no road beyond them. `moveToXY` cannot place a vehicle where there is no road, so SUMO leaves
+it frozen about 1 m before the lane end while the commanded point keeps going, and the gap
+grows ~1.4 m per 0.1 s tick until the vehicle is removed by timeout. That is data outside the
+modeled network, not a projection error of the shadow.
+
+Those ticks are therefore reported apart, with status `FUERA_DE_RED`, and are left out of
+`OK/WARN/FAIL` and of the `error_pos_m` statistics. A tick qualifies only if all of these hold:
+the raw status is not `OK`, the commanded lane is a dead end (no outgoing links), the commanded
+point is at or past the lane end (1.5 m tolerance for the ~1 m clamp), and the point SUMO read
+lags behind it along the lane. A large error on a connected lane is still a `FAIL`.
+
+In `summary.json` and in the console summary:
+
+- `n_FUERA_DE_RED` — number of such ticks (`fuera_de_red` in the console).
+- `error_pos_m_bruto_max` — the raw maximum, including those ticks (shown as `bruto` in the console).
+- `validation_log.csv` keeps every tick, with `projection_status = FUERA_DE_RED` for them.
+
+Example, `mc_2Hz_P00.csv` (62 vehicles, 22 000 states): before the change, `OK/WARN/FAIL =
+21238/22/740` and `position_error_max = 28.47`. After it, `21238/0/0`, `fuera_de_red = 762`
+(= 22 + 740) and `position_error_max = 0.081` (raw 28.47). The causality guard is unaffected.
+
+Use `--strict-net` to restore the raw classification (nothing is reclassified).
 
 ---
 

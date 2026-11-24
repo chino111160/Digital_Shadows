@@ -874,10 +874,16 @@ def run_live(veh, which: str, wb_chains=None, tid_root=None, ws_em=None):
                if (wb is not None and tid_root is not None) else None)
     if ws_em is not None:
         ws_em.emit_hello()                               # first line, BEFORE the loop
-    proc = subprocess.Popen(["ffplay", "-an", "-autoexit", "-loglevel", "quiet",
-                             "-window_title", "VIDEO (realidad)", "-x", "900",
-                             str(VIDEOS[which])], stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
+    try:
+        proc = subprocess.Popen(["ffplay", "-an", "-autoexit", "-loglevel", "quiet",
+                                 "-window_title", "VIDEO (realidad)", "-x", "900",
+                                 str(VIDEOS[which])], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        # ffplay not installed (e.g. bare WSL): the shadow still runs; play the video separately.
+        print(f"[aviso] ffplay no encontrado: se omite la ventana de video ({VIDEOS[which]})",
+              flush=True)
+        proc = None
     time.sleep(0.6)
     cap = cv2.VideoCapture(str(VIDEOS[which]))
     n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)); cap.release()
@@ -915,7 +921,8 @@ def run_live(veh, which: str, wb_chains=None, tid_root=None, ws_em=None):
         except Exception:
             pass
         try:
-            proc.terminate()
+            if proc is not None:
+                proc.terminate()
         except Exception:
             pass
 
@@ -943,6 +950,7 @@ def run_readout(veh, which: str):
     sonda.verify()
     df = pd.DataFrame(rows, columns=["vid", "t", "road", "lane", "x", "y"])
     dat = ROOT / "verify_out/imagenes_finales/datos"
+    dat.mkdir(parents=True, exist_ok=True)    # not versioned in the public release
     df.to_csv(dat / f"causal_sumo_readout_causal_completo_{which}.csv", index=False)
     inv = {}
     for arm, ae in lm.arms.items():
